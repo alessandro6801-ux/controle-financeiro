@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Finanças — Controle Financeiro Mensal</title>
+
+<!-- Tailwind CSS via CDN -->
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- Chart.js via CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<!-- SheetJS (xlsx) via CDN — usado para exportar todos os dados como planilha Excel -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- Google Fonts: Sora (display) + Inter (corpo/dados) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<script>
+  // Configuração customizada do Tailwind: paleta e fontes do projeto
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          display: ['Sora', 'sans-serif'],
+          body: ['Inter', 'sans-serif'],
+        },
+        colors: {
+          base: {
+            950: '#0a0e17',
+            900: '#0f1522',
+            850: '#131a2a',
+            800: '#1a2333',
+            700: '#26314a',
+            600: '#3a4863',
+          },
+          accent: {
+            400: '#a78bfa',
+            500: '#8b5cf6',
+            600: '#7c3aed',
+          },
+          in: {
+            400: '#34d399',
+            500: '#10b981',
+          },
+          out: {
+            400: '#fb7185',
+            500: '#f43f5e',
+          }
+        },
+        boxShadow: {
+          glow: '0 0 0 1px rgba(139,92,246,0.15), 0 8px 30px -8px rgba(139,92,246,0.25)',
+        }
+      }
+    }
+  }
+</script>
+
+<style>
+  /* Fontes base */
+  body { font-family: 'Inter', sans-serif; }
+  h1, h2, h3, .font-display { font-family: 'Sora', sans-serif; }
+
+  /* Scrollbar customizada — discreta e coerente com o tema escuro */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #26314a; border-radius: 8px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a4863; }
+
+  /* Foco visível para acessibilidade de teclado */
+  :focus-visible { outline: 2px solid #a78bfa; outline-offset: 2px; }
+
+  /* Animações de entrada — usa transform:none no estado final para não deixar
+     um "stacking context" residual nos cards (o que fazia os cards ficarem
+     por cima do menu dropdown, mesmo com z-index menor) */
+  @keyframes fadeSlideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .animate-in { animation: fadeSlideUp 0.35s ease-out both; }
+
+  @keyframes modalIn { from { opacity: 0; transform: scale(0.96) translateY(8px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+  .modal-in { animation: modalIn 0.25s cubic-bezier(0.16,1,0.3,1) both; }
+
+  /* Respeita preferência de redução de movimento */
+  @media (prefers-reduced-motion: reduce) {
+    .animate-in, .modal-in { animation: none !important; }
+  }
+
+  /* Anel de progresso (SVG) do card de saldo — elemento assinatura do dashboard */
+  .ring-progress { transition: stroke-dashoffset 0.8s cubic-bezier(0.16,1,0.3,1); }
+
+  /* Linha da tabela com barra lateral colorida por tipo */
+  .row-in { border-left: 3px solid #10b981; }
+  .row-out { border-left: 3px solid #f43f5e; }
+
+  /* Toast */
+  #toast { transition: transform 0.35s cubic-bezier(0.16,1,0.3,1), opacity 0.35s ease; }
+</style>
+</head>
+
+<body class="bg-base-950 text-slate-200 min-h-screen antialiased">
+
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+
+  <!-- ============ HEADER ============ -->
+  <header class="animate-in flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-8">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-accent-500 to-accent-600 flex items-center justify-center shadow-glow shrink-0">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+      </div>
+      <div>
+        <h1 class="font-display text-xl sm:text-2xl font-bold text-white leading-tight">Painel Financeiro</h1>
+        <p class="text-xs sm:text-sm text-slate-400">Controle mensal de entradas e saídas</p>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+      <!-- Seletor de mês/ano -->
+      <div class="flex items-center gap-1 bg-base-900 border border-base-700 rounded-xl px-2 py-1.5">
+        <button id="prevMonthBtn" title="Mês anterior" class="p-1.5 rounded-lg hover:bg-base-800 text-slate-400 hover:text-white transition-colors">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <input id="monthPicker" type="month" class="bg-transparent text-sm text-slate-100 font-medium px-1 py-1 border-0 focus:outline-none focus:ring-0 [color-scheme:dark]" />
+        <button id="nextMonthBtn" title="Próximo mês" class="p-1.5 rounded-lg hover:bg-base-800 text-slate-400 hover:text-white transition-colors">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+      </div>
+
+      <!-- Menu de dados (exportar/importar/encerrar mês) -->
+      <div>
+        <button id="dataMenuBtn" class="p-2.5 bg-base-900 border border-base-700 rounded-xl text-slate-400 hover:text-white hover:bg-base-800 transition-colors" title="Dados e backup">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+        </button>
+      </div>
+      <button id="newEntryBtn" class="flex items-center gap-2 bg-accent-500 hover:bg-accent-600 text-white font-semibold text-sm px-4 py-2.5 rounded-xl shadow-glow transition-colors">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+        Novo Lançamento
+      </button>
+    </div>
+  </header>
+
+  <!-- Menu dropdown de dados: vive fora do header e é posicionado via JS (position: fixed),
+       assim ele é sempre desenhado por cima de todo o resto da página, sem depender de
+       z-index relativo a outros elementos (evita o bug de sobreposição com os cards). -->
+  <div id="dataMenu" class="hidden fixed w-56 bg-base-900 border border-base-700 rounded-xl shadow-2xl overflow-hidden z-[9999]">
+    <button id="closeMonthBtn" class="w-full text-left px-4 py-2.5 text-sm text-slate-200 hover:bg-base-800 flex items-center gap-2">
+      <svg class="w-4 h-4 text-accent-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
+      Encerrar / salvar mês
+    </button>
+    <button id="exportExcelBtn" class="w-full text-left px-4 py-2.5 text-sm text-slate-200 hover:bg-base-800 flex items-center gap-2">
+      <svg class="w-4 h-4 text-in-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+      Exportar para Excel (.xlsx)
+    </button>
+    <button id="exportBtn" class="w-full text-left px-4 py-2.5 text-sm text-slate-200 hover:bg-base-800 flex items-center gap-2">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+      Exportar backup (JSON)
+    </button>
+    <button id="importBtn" class="w-full text-left px-4 py-2.5 text-sm text-slate-200 hover:bg-base-800 flex items-center gap-2">
+      <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V9m0 0l-4 4m4-4l4 4M4 7V5a2 2 0 012-2h12a2 2 0 012 2v2"/></svg>
+      Importar backup (JSON)
+    </button>
+    <input type="file" id="importFileInput" accept=".json" class="hidden" />
+  </div>
+
+  <!-- ============ KPI CARDS ============ -->
+  <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+
+    <!-- Saldo Total — card de destaque com anel de progresso (elemento assinatura) -->
+    <div class="animate-in lg:col-span-1 relative bg-gradient-to-br from-base-900 to-base-850 border border-base-700 rounded-2xl p-5 flex items-center justify-between overflow-hidden">
+      <div>
+        <p class="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Saldo do mês</p>
+        <p id="kpiSaldo" class="font-display text-2xl sm:text-3xl font-bold text-white">R$ 0,00</p>
+        <p id="kpiSaldoLabel" class="text-xs text-slate-500 mt-1">Sem lançamentos ainda</p>
+      </div>
+      <div class="relative w-16 h-16 shrink-0">
+        <svg viewBox="0 0 64 64" class="w-16 h-16 -rotate-90">
+          <circle cx="32" cy="32" r="27" fill="none" stroke="#1a2333" stroke-width="6"/>
+          <circle id="saldoRing" class="ring-progress" cx="32" cy="32" r="27" fill="none" stroke="#8b5cf6" stroke-width="6" stroke-linecap="round" stroke-dasharray="169.6" stroke-dashoffset="169.6"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Entradas -->
+    <div class="animate-in bg-base-900 border border-base-700 rounded-2xl p-5">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="w-2 h-2 rounded-full bg-in-400"></span>
+        <p class="text-xs font-medium text-slate-400 uppercase tracking-wide">Entradas</p>
+      </div>
+      <p id="kpiEntradas" class="font-display text-2xl font-bold text-in-400">R$ 0,00</p>
+      <p id="kpiEntradasCount" class="text-xs text-slate-500 mt-1">0 lançamentos</p>
+    </div>
+
+    <!-- Saídas -->
+    <div class="animate-in bg-base-900 border border-base-700 rounded-2xl p-5">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="w-2 h-2 rounded-full bg-out-400"></span>
+        <p class="text-xs font-medium text-slate-400 uppercase tracking-wide">Saídas</p>
+      </div>
+      <p id="kpiSaidas" class="font-display text-2xl font-bold text-out-400">R$ 0,00</p>
+      <p id="kpiSaidasCount" class="text-xs text-slate-500 mt-1">0 lançamentos</p>
+    </div>
+
+    <!-- Taxa de Poupança -->
+    <div class="animate-in bg-base-900 border border-base-700 rounded-2xl p-5">
+      <p class="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Taxa de poupança</p>
+      <p id="kpiTaxa" class="font-display text-2xl font-bold text-white">0%</p>
+      <div class="w-full h-1.5 bg-base-800 rounded-full mt-2 overflow-hidden">
+        <div id="kpiTaxaBar" class="h-full bg-accent-500 rounded-full transition-all duration-700" style="width:0%"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ GRÁFICOS ============ -->
+  <section class="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-8">
+    <div class="animate-in lg:col-span-2 bg-base-900 border border-base-700 rounded-2xl p-5">
+      <h3 class="font-display text-sm font-semibold text-white mb-4">Despesas por categoria</h3>
+      <div class="relative h-64 flex items-center justify-center">
+        <canvas id="expenseChart"></canvas>
+        <p id="expenseEmpty" class="hidden absolute text-sm text-slate-500 text-center px-6">Nenhuma despesa registrada neste mês ainda.</p>
+      </div>
+    </div>
+    <div class="animate-in lg:col-span-3 bg-base-900 border border-base-700 rounded-2xl p-5">
+      <h3 class="font-display text-sm font-semibold text-white mb-4">Entradas vs Saídas</h3>
+      <div class="relative h-64">
+        <canvas id="comparisonChart"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TABELA DE LANÇAMENTOS ============ -->
+  <section class="animate-in bg-base-900 border border-base-700 rounded-2xl overflow-hidden">
+    <div class="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-base-800">
+      <h3 class="font-display text-sm font-semibold text-white">Lançamentos do mês</h3>
+      <div class="flex flex-wrap gap-2">
+        <select id="filterTipo" class="bg-base-850 border border-base-700 text-slate-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-accent-500">
+          <option value="todos">Todos os tipos</option>
+          <option value="entrada">Entradas</option>
+          <option value="saida">Saídas</option>
+        </select>
+        <select id="filterCategoria" class="bg-base-850 border border-base-700 text-slate-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-accent-500">
+          <option value="todas">Todas as categorias</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left text-xs text-slate-500 uppercase tracking-wide">
+            <th class="px-5 py-3 font-medium">Descrição</th>
+            <th class="px-5 py-3 font-medium">Categoria</th>
+            <th class="px-5 py-3 font-medium hidden sm:table-cell">Pagamento</th>
+            <th class="px-5 py-3 font-medium hidden md:table-cell">Data</th>
+            <th class="px-5 py-3 font-medium text-right">Valor</th>
+            <th class="px-5 py-3 font-medium text-right">Ação</th>
+          </tr>
+        </thead>
+        <tbody id="entriesTableBody" class="divide-y divide-base-800"></tbody>
+      </table>
+      <div id="emptyState" class="hidden flex-col items-center justify-center gap-2 py-14 text-center">
+        <svg class="w-10 h-10 text-slate-600 mx-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v5"/></svg>
+        <p class="text-slate-400 text-sm mt-2">Nenhum lançamento neste mês.</p>
+        <p class="text-slate-600 text-xs">Use “Novo Lançamento” para começar a registrar.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer class="text-center text-xs text-slate-600 mt-8 pb-4">
+    Todos os dados ficam salvos apenas neste navegador (localStorage). Use o backup em JSON para não perder informações.
+  </footer>
+</div>
+
+<!-- ============ MODAL: NOVO LANÇAMENTO ============ -->
+<div id="entryModal" class="hidden fixed inset-0 z-40 flex items-end sm:items-center justify-center p-0 sm:p-4">
+  <div id="modalOverlay" class="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
+  <div class="modal-in relative bg-base-900 border border-base-700 w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl p-6 max-h-[92vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-5">
+      <h3 class="font-display text-lg font-bold text-white">Novo Lançamento</h3>
+      <button id="closeModalBtn" class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-base-800">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <form id="entryForm" class="space-y-4">
+      <!-- Tipo (segmented control) -->
+      <div>
+        <label class="block text-xs font-medium text-slate-400 mb-2">Tipo</label>
+        <div class="grid grid-cols-2 gap-2">
+          <button type="button" data-tipo="entrada" class="tipo-btn flex items-center justify-center gap-1.5 py-2.5 rounded-xl border text-sm font-semibold transition-colors border-in-500 bg-in-500/10 text-in-400">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+            Entrada
+          </button>
+          <button type="button" data-tipo="saida" class="tipo-btn flex items-center justify-center gap-1.5 py-2.5 rounded-xl border text-sm font-semibold transition-colors border-base-700 text-slate-400">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+            Saída
+          </button>
+        </div>
+        <input type="hidden" id="entryTipo" value="entrada" />
+      </div>
+
+      <div>
+        <label for="entryDesc" class="block text-xs font-medium text-slate-400 mb-1.5">Descrição / Título</label>
+        <input required id="entryDesc" type="text" placeholder="Ex: Salário, Supermercado..." class="w-full bg-base-850 border border-base-700 text-slate-100 text-sm rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-accent-500 placeholder:text-slate-600" />
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label for="entryValor" class="block text-xs font-medium text-slate-400 mb-1.5">Valor (R$)</label>
+          <input required id="entryValor" type="text" inputmode="decimal" placeholder="0,00" class="w-full bg-base-850 border border-base-700 text-slate-100 text-sm rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-accent-500 placeholder:text-slate-600" />
+        </div>
+        <div>
+          <label for="entryData" class="block text-xs font-medium text-slate-400 mb-1.5">Data</label>
+          <input required id="entryData" type="date" class="w-full bg-base-850 border border-base-700 text-slate-100 text-sm rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-accent-500 [color-scheme:dark]" />
+        </div>
+      </div>
+
+      <div>
+        <label for="entryCategoria" class="block text-xs font-medium text-slate-400 mb-1.5">Categoria</label>
+        <select id="entryCategoria" class="w-full bg-base-850 border border-base-700 text-slate-100 text-sm rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-accent-500"></select>
+      </div>
+
+      <div>
+        <label for="entryPagamento" class="block text-xs font-medium text-slate-400 mb-1.5">Forma de pagamento</label>
+        <select id="entryPagamento" class="w-full bg-base-850 border border-base-700 text-slate-100 text-sm rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-accent-500">
+          <option value="Pix">Pix</option>
+          <option value="Cartão de Crédito">Cartão de Crédito</option>
+          <option value="Cartão de Débito">Cartão de Débito</option>
+          <option value="Boleto">Boleto</option>
+          <option value="Dinheiro">Dinheiro</option>
+          <option value="Transferência">Transferência</option>
+        </select>
+      </div>
+
+      <button type="submit" class="w-full bg-accent-500 hover:bg-accent-600 text-white font-semibold text-sm py-3 rounded-xl transition-colors mt-2">
+        Salvar lançamento
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- ============ TOAST ============ -->
+<div id="toast" class="fixed bottom-5 left-1/2 -translate-x-1/2 translate-y-24 opacity-0 z-50 bg-base-800 border border-base-700 text-slate-100 text-sm px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2">
+  <span id="toastIcon"></span>
+  <span id="toastMsg"></span>
+</div>
+
+<script>
+/* =========================================================================
+   CONTROLE FINANCEIRO PESSOAL — SCRIPT PRINCIPAL (Vanilla JS)
+   Dados persistidos em localStorage, organizados por mês (chave "AAAA-MM").
+   ========================================================================= */
+
+// ---------- Constantes e categorias ----------
+const STORAGE_KEY = 'financeApp.data.v1';
+
+const CATEGORIAS = {
+  entrada: ['Salário', 'Freelance', 'Investimentos', 'Presente', 'Outros'],
+  saida: ['Alimentação', 'Transporte', 'Moradia', 'Saúde', 'Educação', 'Lazer', 'Compras', 'Contas', 'Outros']
+};
+
+// Paleta fixa por categoria (para o gráfico de rosca ficar consistente entre meses)
+const CATEGORIA_CORES = {
+  'Alimentação': '#f43f5e', 'Transporte': '#fb923c', 'Moradia': '#facc15',
+  'Saúde': '#4ade80', 'Educação': '#22d3ee', 'Lazer': '#f472b6',
+  'Compras': '#38bdf8', 'Contas': '#2dd4bf', 'Outros': '#94a3b8'
+};
+
+// ---------- Estado em memória ----------
+let db = {};                 // { "2026-07": [ {id, desc, valor, tipo, categoria, data, pagamento}, ... ] }
+let currentMonthKey = '';    // ex: "2026-07"
+let expenseChart, comparisonChart;
+
+// ---------- Persistência (localStorage) ----------
+function loadDB() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    db = raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    console.error('Erro ao ler dados salvos:', e);
+    db = {};
+  }
+}
+
+function saveDB() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+  } catch (e) {
+    // Se o navegador bloquear o localStorage (aba anônima, preview em iframe, etc.),
+    // não deixamos isso travar o restante da aplicação — o lançamento continua
+    // aparecendo na tela, só não fica salvo entre sessões.
+    console.error('Erro ao salvar no localStorage:', e);
+    showToast('Não foi possível salvar localmente neste navegador.', 'err');
+  }
+}
+
+function getMonthEntries(key) {
+  if (!db[key]) db[key] = [];
+  return db[key];
+}
+
+// Corrige dados salvos antes da regra "lançamento pertence ao mês da própria data":
+// reagrupa todos os lançamentos de todos os meses pela data de cada um.
+// É seguro rodar sempre — se os dados já estiverem corretos, não muda nada.
+function migrateEntriesByOwnDate() {
+  const rebuilt = {};
+  let changed = false;
+  Object.keys(db).forEach(monthKey => {
+    (db[monthKey] || []).forEach(entry => {
+      const correctMonth = (entry.data || monthKey).slice(0, 7);
+      if (correctMonth !== monthKey) changed = true;
+      if (!rebuilt[correctMonth]) rebuilt[correctMonth] = [];
+      if (!rebuilt[correctMonth].some(e => e.id === entry.id)) {
+        rebuilt[correctMonth].push(entry);
+      }
+    });
+  });
+  if (changed) {
+    db = rebuilt;
+    saveDB();
+  }
+}
+
+// ---------- Utilitários ----------
+function formatCurrency(value) {
+  return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function todayKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+function showToast(message, type = 'ok') {
+  const toast = document.getElementById('toast');
+  const icon = document.getElementById('toastIcon');
+  document.getElementById('toastMsg').textContent = message;
+  icon.innerHTML = type === 'ok'
+    ? '<svg class="w-4 h-4 text-in-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>'
+    : '<svg class="w-4 h-4 text-out-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+  toast.classList.remove('opacity-0', 'translate-y-24');
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(() => {
+    toast.classList.add('opacity-0', 'translate-y-24');
+  }, 2600);
+}
+
+// ---------- Navegação de mês ----------
+function setMonth(key) {
+  currentMonthKey = key;
+  document.getElementById('monthPicker').value = key;
+  renderAll();
+}
+
+function shiftMonth(delta) {
+  const [y, m] = currentMonthKey.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+}
+
+// ---------- Renderização geral ----------
+function renderAll() {
+  populateCategoriaFilter();
+  renderKPIs();
+  renderTable();
+  renderCharts();
+}
+
+function currentEntries() {
+  return getMonthEntries(currentMonthKey);
+}
+
+function filteredEntries() {
+  const tipo = document.getElementById('filterTipo').value;
+  const cat = document.getElementById('filterCategoria').value;
+  return currentEntries().filter(e => {
+    if (tipo !== 'todos' && e.tipo !== tipo) return false;
+    if (cat !== 'todas' && e.categoria !== cat) return false;
+    return true;
+  }).sort((a, b) => b.data.localeCompare(a.data));
+}
+
+// ---------- KPIs ----------
+function renderKPIs() {
+  const entries = currentEntries();
+  const entradas = entries.filter(e => e.tipo === 'entrada').reduce((s, e) => s + e.valor, 0);
+  const saidas = entries.filter(e => e.tipo === 'saida').reduce((s, e) => s + e.valor, 0);
+  const saldo = entradas - saidas;
+  const taxa = entradas > 0 ? Math.max(0, (saldo / entradas) * 100) : 0;
+
+  document.getElementById('kpiSaldo').textContent = formatCurrency(saldo);
+  document.getElementById('kpiSaldo').className = 'font-display text-2xl sm:text-3xl font-bold ' + (saldo >= 0 ? 'text-white' : 'text-out-400');
+  document.getElementById('kpiSaldoLabel').textContent = entries.length === 0
+    ? 'Sem lançamentos ainda'
+    : (saldo >= 0 ? 'Saldo positivo no mês' : 'Saldo negativo no mês');
+
+  document.getElementById('kpiEntradas').textContent = formatCurrency(entradas);
+  document.getElementById('kpiEntradasCount').textContent = `${entries.filter(e => e.tipo === 'entrada').length} lançamentos`;
+
+  document.getElementById('kpiSaidas').textContent = formatCurrency(saidas);
+  document.getElementById('kpiSaidasCount').textContent = `${entries.filter(e => e.tipo === 'saida').length} lançamentos`;
+
+  document.getElementById('kpiTaxa').textContent = `${taxa.toFixed(1)}%`;
+  document.getElementById('kpiTaxaBar').style.width = `${Math.min(100, taxa)}%`;
+
+  // Anel de progresso do card de saldo (circunferência = 2*pi*27 ≈ 169.6)
+  const circumference = 169.6;
+  const pct = entradas > 0 ? Math.min(1, Math.max(0, saldo / entradas)) : 0;
+  const ring = document.getElementById('saldoRing');
+  ring.setAttribute('stroke-dashoffset', circumference - (circumference * pct));
+  ring.setAttribute('stroke', saldo >= 0 ? '#8b5cf6' : '#f43f5e');
+}
+
+// ---------- Tabela ----------
+function populateCategoriaFilter() {
+  const select = document.getElementById('filterCategoria');
+  const current = select.value;
+  const todasCategorias = [...CATEGORIAS.entrada, ...CATEGORIAS.saida];
+  const unique = [...new Set(todasCategorias)];
+  select.innerHTML = '<option value="todas">Todas as categorias</option>' +
+    unique.map(c => `<option value="${c}">${c}</option>`).join('');
+  select.value = current && unique.includes(current) ? current : 'todas';
+}
+
+function renderTable() {
+  const tbody = document.getElementById('entriesTableBody');
+  const entries = filteredEntries();
+  const emptyState = document.getElementById('emptyState');
+
+  if (entries.length === 0) {
+    tbody.innerHTML = '';
+    emptyState.classList.remove('hidden');
+    emptyState.classList.add('flex');
+    return;
+  }
+  emptyState.classList.add('hidden');
+  emptyState.classList.remove('flex');
+
+  tbody.innerHTML = entries.map(e => {
+    const isIn = e.tipo === 'entrada';
+    const dataFmt = new Date(e.data + 'T00:00:00').toLocaleDateString('pt-BR');
+    return `
+      <tr class="${isIn ? 'row-in' : 'row-out'} hover:bg-base-850/60 transition-colors">
+        <td class="px-5 py-3 font-medium text-slate-100">${escapeHTML(e.desc)}</td>
+        <td class="px-5 py-3 text-slate-400">
+          <span class="inline-flex items-center gap-1.5 text-xs bg-base-850 border border-base-700 px-2 py-1 rounded-md">
+            <span class="w-1.5 h-1.5 rounded-full" style="background:${isIn ? '#34d399' : '#fb7185'}"></span>
+            ${escapeHTML(e.categoria)}
+          </span>
+        </td>
+        <td class="px-5 py-3 text-slate-400 hidden sm:table-cell">${escapeHTML(e.pagamento)}</td>
+        <td class="px-5 py-3 text-slate-400 hidden md:table-cell">${dataFmt}</td>
+        <td class="px-5 py-3 text-right font-semibold ${isIn ? 'text-in-400' : 'text-out-400'}">
+          ${isIn ? '+' : '−'} ${formatCurrency(e.valor)}
+        </td>
+        <td class="px-5 py-3 text-right">
+          <button data-id="${e.id}" class="deleteBtn p-1.5 rounded-lg text-slate-500 hover:text-out-400 hover:bg-out-500/10 transition-colors" title="Excluir lançamento">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0l-1 14a2 2 0 01-2 2H7a2 2 0 01-2-2L4 6h16z"/></svg>
+          </button>
+        </td>
+      </tr>`;
+  }).join('');
+
+  document.querySelectorAll('.deleteBtn').forEach(btn => {
+    btn.addEventListener('click', () => deleteEntry(btn.dataset.id));
+  });
+}
+
+function escapeHTML(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ---------- Gráficos (Chart.js) ----------
+const CHART_TEXT_COLOR = '#94a3b8';
+const CHART_GRID_COLOR = 'rgba(148,163,184,0.08)';
+
+function renderCharts() {
+  const entries = currentEntries();
+  renderExpenseChart(entries);
+  renderComparisonChart(entries);
+}
+
+function renderExpenseChart(entries) {
+  const saidas = entries.filter(e => e.tipo === 'saida');
+  const porCategoria = {};
+  saidas.forEach(e => { porCategoria[e.categoria] = (porCategoria[e.categoria] || 0) + e.valor; });
+
+  const labels = Object.keys(porCategoria);
+  const values = Object.values(porCategoria);
+  const colors = labels.map(l => CATEGORIA_CORES[l] || '#94a3b8');
+
+  const canvas = document.getElementById('expenseChart');
+  const emptyMsg = document.getElementById('expenseEmpty');
+
+  if (expenseChart) expenseChart.destroy();
+
+  if (labels.length === 0) {
+    canvas.classList.add('hidden');
+    emptyMsg.classList.remove('hidden');
+    return;
+  }
+  canvas.classList.remove('hidden');
+  emptyMsg.classList.add('hidden');
+
+  expenseChart = new Chart(canvas, {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{ data: values, backgroundColor: colors, borderColor: '#0f1522', borderWidth: 3, hoverOffset: 6 }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '68%',
+      plugins: {
+        legend: { position: 'bottom', labels: { color: CHART_TEXT_COLOR, boxWidth: 10, padding: 12, font: { size: 11 } } },
+        tooltip: {
+          callbacks: { label: (ctx) => ` ${ctx.label}: ${formatCurrency(ctx.raw)}` }
+        }
+      }
+    }
+  });
+}
+
+function renderComparisonChart(entries) {
+  const entradas = entries.filter(e => e.tipo === 'entrada').reduce((s, e) => s + e.valor, 0);
+  const saidas = entries.filter(e => e.tipo === 'saida').reduce((s, e) => s + e.valor, 0);
+
+  const canvas = document.getElementById('comparisonChart');
+  if (comparisonChart) comparisonChart.destroy();
+
+  // Plugin simples que escreve o valor formatado em cima de cada barra —
+  // assim dá pra ler o número mesmo quando a barra é bem menor que a outra.
+  const valueLabelPlugin = {
+    id: 'valueLabelPlugin',
+    afterDatasetsDraw(chart) {
+      const { ctx } = chart;
+      chart.data.datasets.forEach((dataset, i) => {
+        const meta = chart.getDatasetMeta(i);
+        meta.data.forEach((bar, index) => {
+          const value = dataset.data[index];
+          ctx.save();
+          ctx.fillStyle = '#e2e8f0';
+          ctx.font = '600 13px Inter, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(formatCurrency(value), bar.x, bar.y - 8);
+          ctx.restore();
+        });
+      });
+    }
+  };
+
+  comparisonChart = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: ['Entradas', 'Saídas'],
+      datasets: [{
+        data: [entradas, saidas],
+        backgroundColor: ['#10b981', '#f43f5e'],
+        borderRadius: 8,
+        barThickness: 64
+      }]
+    },
+    plugins: [valueLabelPlugin],
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: { padding: { top: 24 } },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: (ctx) => ` ${formatCurrency(ctx.raw)}` } }
+      },
+      scales: {
+        y: { beginAtZero: true, ticks: { color: CHART_TEXT_COLOR, callback: v => 'R$ ' + v }, grid: { color: CHART_GRID_COLOR } },
+        x: { ticks: { color: CHART_TEXT_COLOR }, grid: { display: false } }
+      }
+    }
+  });
+}
+
+// ---------- CRUD de lançamentos ----------
+function addEntry(entry) {
+  // O lançamento pertence ao mês da DATA informada no formulário — não ao mês
+  // que estava sendo visualizado no momento do clique em "Novo Lançamento".
+  const targetMonth = entry.data.slice(0, 7); // "AAAA-MM-DD" -> "AAAA-MM"
+  getMonthEntries(targetMonth).push(entry);
+  saveDB();
+  if (targetMonth !== currentMonthKey) {
+    setMonth(targetMonth); // já chama renderAll() internamente
+  } else {
+    renderAll();
+  }
+}
+
+function deleteEntry(id) {
+  db[currentMonthKey] = getMonthEntries(currentMonthKey).filter(e => e.id !== id);
+  saveDB();
+  renderAll();
+  showToast('Lançamento excluído.', 'err');
+}
+
+// ---------- Modal ----------
+function openModal() {
+  document.getElementById('entryForm').reset();
+  document.getElementById('entryData').value = new Date().toISOString().slice(0, 10);
+  setTipoUI('entrada');
+  document.getElementById('entryModal').classList.remove('hidden');
+  document.getElementById('entryDesc').focus();
+}
+
+function closeModal() {
+  document.getElementById('entryModal').classList.add('hidden');
+}
+
+function setTipoUI(tipo) {
+  document.getElementById('entryTipo').value = tipo;
+  document.querySelectorAll('.tipo-btn').forEach(btn => {
+    const active = btn.dataset.tipo === tipo;
+    const isIn = tipo === 'entrada';
+    btn.className = 'tipo-btn flex items-center justify-center gap-1.5 py-2.5 rounded-xl border text-sm font-semibold transition-colors ' +
+      (btn.dataset.tipo === tipo
+        ? (isIn ? 'border-in-500 bg-in-500/10 text-in-400' : 'border-out-500 bg-out-500/10 text-out-400')
+        : 'border-base-700 text-slate-400');
+  });
+  populateCategoriaSelect(tipo);
+}
+
+function populateCategoriaSelect(tipo) {
+  const select = document.getElementById('entryCategoria');
+  select.innerHTML = CATEGORIAS[tipo].map(c => `<option value="${c}">${c}</option>`).join('');
+}
+
+// ---------- Exportar tudo para Excel (.xlsx) — funciona como "banco de dados" externo ----------
+function exportExcel() {
+  const monthKeys = Object.keys(db).sort();
+  if (monthKeys.length === 0) {
+    showToast('Não há dados para exportar.', 'err');
+    return;
+  }
+
+  const wb = XLSX.utils.book_new();
+
+  // Aba "Resumo": totais consolidados de todos os meses salvos
+  const resumo = monthKeys.map(key => {
+    const entries = db[key];
+    const entradas = entries.filter(e => e.tipo === 'entrada').reduce((s, e) => s + e.valor, 0);
+    const saidas = entries.filter(e => e.tipo === 'saida').reduce((s, e) => s + e.valor, 0);
+    return {
+      'Mês': key,
+      'Entradas (R$)': Number(entradas.toFixed(2)),
+      'Saídas (R$)': Number(saidas.toFixed(2)),
+      'Saldo (R$)': Number((entradas - saidas).toFixed(2)),
+      'Lançamentos': entries.length
+    };
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumo), 'Resumo');
+
+  // Uma aba por mês, com todos os lançamentos detalhados
+  monthKeys.forEach(key => {
+    const linhas = db[key].map(e => ({
+      'Data': e.data,
+      'Descrição': e.desc,
+      'Tipo': e.tipo === 'entrada' ? 'Entrada' : 'Saída',
+      'Categoria': e.categoria,
+      'Forma de Pagamento': e.pagamento,
+      'Valor (R$)': Number(e.valor.toFixed(2))
+    }));
+    // Nomes de aba no Excel são limitados a 31 caracteres — "AAAA-MM" cabe tranquilamente
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(linhas), key);
+  });
+
+  XLSX.writeFile(wb, `financas-banco-de-dados-${todayKey()}.xlsx`);
+  showToast('Exportado para Excel com sucesso.');
+}
+
+// ---------- Backup: exportar / importar JSON ----------
+function exportBackup() {
+  const blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `backup-financas-${currentMonthKey}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  showToast('Backup exportado com sucesso.');
+}
+
+function importBackup(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(reader.result);
+      if (typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Formato inválido');
+      // Mescla o backup importado com os dados atuais (backup tem prioridade)
+      db = { ...db, ...parsed };
+      saveDB();
+      renderAll();
+      showToast('Backup importado com sucesso.');
+    } catch (e) {
+      showToast('Arquivo inválido. Verifique o JSON.', 'err');
+    }
+  };
+  reader.readAsText(file);
+}
+
+// ---------- Inicialização e eventos ----------
+document.addEventListener('DOMContentLoaded', () => {
+  loadDB();
+  migrateEntriesByOwnDate();
+  currentMonthKey = todayKey();
+  document.getElementById('monthPicker').value = currentMonthKey;
+  document.getElementById('entryData').value = new Date().toISOString().slice(0, 10);
+  populateCategoriaSelect('entrada');
+  renderAll();
+
+  // Navegação de mês
+  document.getElementById('prevMonthBtn').addEventListener('click', () => shiftMonth(-1));
+  document.getElementById('nextMonthBtn').addEventListener('click', () => shiftMonth(1));
+  document.getElementById('monthPicker').addEventListener('change', (e) => setMonth(e.target.value));
+
+  // Menu de dados — posicionado via JS (fixed) para nunca ficar atrás de outros elementos
+  const dataMenu = document.getElementById('dataMenu');
+  const dataMenuBtn = document.getElementById('dataMenuBtn');
+
+  function positionDataMenu() {
+    const btnRect = dataMenuBtn.getBoundingClientRect();
+    const menuWidth = 224; // w-56
+    dataMenu.style.top = `${btnRect.bottom + 8}px`;
+    // Alinha a borda direita do menu com a borda direita do botão, sem sair da tela
+    let left = btnRect.right - menuWidth;
+    left = Math.max(8, Math.min(left, window.innerWidth - menuWidth - 8));
+    dataMenu.style.left = `${left}px`;
+  }
+
+  dataMenuBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isHidden = dataMenu.classList.contains('hidden');
+    if (isHidden) positionDataMenu();
+    dataMenu.classList.toggle('hidden');
+  });
+  document.addEventListener('click', (e) => {
+    if (!dataMenu.contains(e.target) && e.target !== dataMenuBtn) dataMenu.classList.add('hidden');
+  });
+  window.addEventListener('resize', () => { if (!dataMenu.classList.contains('hidden')) positionDataMenu(); });
+
+  document.getElementById('closeMonthBtn').addEventListener('click', () => {
+    saveDB();
+    showToast(`Mês ${currentMonthKey} salvo com sucesso.`);
+    dataMenu.classList.add('hidden');
+  });
+  document.getElementById('exportExcelBtn').addEventListener('click', () => { exportExcel(); dataMenu.classList.add('hidden'); });
+  document.getElementById('exportBtn').addEventListener('click', () => { exportBackup(); dataMenu.classList.add('hidden'); });
+  document.getElementById('importBtn').addEventListener('click', () => {
+    document.getElementById('importFileInput').click();
+    dataMenu.classList.add('hidden');
+  });
+  document.getElementById('importFileInput').addEventListener('change', (e) => {
+    if (e.target.files[0]) importBackup(e.target.files[0]);
+    e.target.value = '';
+  });
+
+  // Modal
+  document.getElementById('newEntryBtn').addEventListener('click', openModal);
+  document.getElementById('closeModalBtn').addEventListener('click', closeModal);
+  document.getElementById('modalOverlay').addEventListener('click', closeModal);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeModal();
+  });
+
+  document.querySelectorAll('.tipo-btn').forEach(btn => {
+    btn.addEventListener('click', () => setTipoUI(btn.dataset.tipo));
+  });
+
+  document.getElementById('entryForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    try {
+      const entry = {
+        id: uid(),
+        desc: document.getElementById('entryDesc').value.trim(),
+        valor: parseFloat(document.getElementById('entryValor').value.replace(/\./g, '').replace(',', '.')),
+        tipo: document.getElementById('entryTipo').value,
+        categoria: document.getElementById('entryCategoria').value,
+        data: document.getElementById('entryData').value,
+        pagamento: document.getElementById('entryPagamento').value,
+      };
+      if (!entry.desc || !entry.valor || entry.valor <= 0) {
+        showToast('Preencha descrição e valor corretamente.', 'err');
+        return;
+      }
+      const mesEntrada = entry.data.slice(0, 7);
+      addEntry(entry);
+      closeModal();
+      showToast(
+        mesEntrada === currentMonthKey
+          ? 'Lançamento adicionado com sucesso.'
+          : 'Lançamento salvo — exibindo o mês correspondente à data.'
+      );
+    } catch (err) {
+      console.error('Erro ao salvar lançamento:', err);
+      showToast('Ocorreu um erro ao salvar o lançamento.', 'err');
+    }
+  });
+
+  // Filtros da tabela
+  document.getElementById('filterTipo').addEventListener('change', renderTable);
+  document.getElementById('filterCategoria').addEventListener('change', renderTable);
+});
+</script>
+
+</body>
+</html>
